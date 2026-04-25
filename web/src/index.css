@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+:root {
+  --mp-primary: #9a8abd;
+  --mp-primary-light: #b8aad0;
+  --mp-primary-lighter: #f0ecf6;
+  --mp-accent: #8878aa;
+  --mp-success: #8bbd8b;
+  --mp-warning: #d4b07a;
+  --mp-danger: #d47a7a;
+
+  --mp-sidebar: linear-gradient(180deg, #f0ecf6 0%, #e0d8ec 100%);
+  --mp-sidebar-text: #5c5070;
+  --mp-sidebar-active-text: #8878aa;
+  --mp-sidebar-active-bg: rgba(136, 120, 170, 0.10);
+
+  --mp-header-bg: rgba(255, 255, 255, 0.72);
+  --mp-body-bg: #f7f4fa;
+  --mp-card-bg: rgba(255, 255, 255, 0.82);
+  --mp-card-border: rgba(154, 138, 189, 0.12);
+  --mp-card-shadow: 0 2px 16px rgba(154, 138, 189, 0.06);
+
+  --mp-text-primary: #3a3448;
+  --mp-text-regular: #5c5070;
+  --mp-text-secondary: #9690a8;
+  --mp-border-color: #e0d8ec;
+
+  --mp-login-bg: linear-gradient(135deg, #f0ecf6 0%, #e0d8ec 50%, #b8aad0 100%);
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  color: var(--mp-text-primary);
+  background: var(--mp-body-bg);
+}
+
+/* 全局滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--mp-border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mp-primary-light); }
