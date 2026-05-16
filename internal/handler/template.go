@@ -11,11 +11,16 @@ import (
 )
 
 type TemplateHandler struct {
-	store *store.TemplateStore
+	store        *store.TemplateStore
+	versionStore *store.TemplateVersionStore
 }
 
-func NewTemplateHandler(s *store.TemplateStore) *TemplateHandler {
-	return &TemplateHandler{store: s}
+func NewTemplateHandler(s *store.TemplateStore, vs ...*store.TemplateVersionStore) *TemplateHandler {
+	h := &TemplateHandler{store: s}
+	if len(vs) > 0 {
+		h.versionStore = vs[0]
+	}
+	return h
 }
 
 func (h *TemplateHandler) Create(c *gin.Context) {
@@ -78,6 +83,11 @@ func (h *TemplateHandler) Update(c *gin.Context) {
 	t.Prompt = req.Prompt
 	t.Version++
 
+	// 保存旧版本
+	if h.versionStore != nil {
+		h.versionStore.Save(t.ID, req.Prompt, t.Version)
+	}
+
 	if err := h.store.Update(t); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -96,4 +106,59 @@ func (h *TemplateHandler) Delete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *TemplateHandler) ListVersions(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if h.versionStore == nil {
+		c.JSON(http.StatusOK, []any{})
+		return
+	}
+	versions, err := h.versionStore.ListByTemplate(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, versions)
+}
+
+func (h *TemplateHandler) Rollback(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req struct {
+		Version int `json:"version" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.versionStore == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "version store not configured"})
+		return
+	}
+	v, err := h.versionStore.GetByVersion(id, req.Version)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
+		return
+	}
+	t, err := h.store.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		return
+	}
+	t.Prompt = v.Prompt
+	t.Version++
+	h.versionStore.Save(t.ID, t.Prompt, t.Version)
+	if err := h.store.Update(t); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, t)
 }

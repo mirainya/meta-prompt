@@ -19,6 +19,9 @@ type History struct {
 	ReviewerOutput  json.RawMessage `json:"reviewer_output,omitempty" gorm:"type:jsonb"`
 	TemplateIDs     json.RawMessage `json:"template_ids" gorm:"type:jsonb"`
 	DurationMs      int             `json:"duration_ms" gorm:"not null"`
+	WebhookURL      string          `json:"webhook_url,omitempty" gorm:"type:text"`
+	WebhookSecret   string          `json:"-" gorm:"type:text"`
+	Source          string          `json:"source" gorm:"size:20;not null;default:'web'"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }

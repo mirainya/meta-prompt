@@ -15,6 +15,8 @@ type PipelineRequest struct {
 	Input               string
 	UserID              int64
 	LLMProvider         string
+	Source              string
+	WebhookURL          string
 	AnalyzerTemplateID  *int64
 	ArchitectTemplateID *int64
 	WriterTemplateID    *int64
@@ -39,10 +41,12 @@ type Pipeline struct {
 	reviewer      *Reviewer
 	templateStore *store.TemplateStore
 	historyStore  *store.HistoryStore
+	eventBus      *EventBus
+	webhook       *WebhookService
 	cancels       sync.Map // historyID -> context.CancelFunc
 }
 
-func NewPipeline(a *Analyzer, arch *Architect, w *Writer, r *Reviewer, ts *store.TemplateStore, hs *store.HistoryStore) *Pipeline {
+func NewPipeline(a *Analyzer, arch *Architect, w *Writer, r *Reviewer, ts *store.TemplateStore, hs *store.HistoryStore, eb *EventBus, wh *WebhookService) *Pipeline {
 	return &Pipeline{
 		analyzer:      a,
 		architect:     arch,
@@ -50,8 +54,12 @@ func NewPipeline(a *Analyzer, arch *Architect, w *Writer, r *Reviewer, ts *store
 		reviewer:      r,
 		templateStore: ts,
 		historyStore:  hs,
+		eventBus:      eb,
+		webhook:       wh,
 	}
 }
+
+func (p *Pipeline) EventBus() *EventBus { return p.eventBus }
 
 // ExecuteAsync 异步执行 pipeline，先创建 history 记录，返回 id，后台执行
 func (p *Pipeline) ExecuteAsync(req PipelineRequest) (int64, error) {
@@ -75,13 +83,19 @@ func (p *Pipeline) ExecuteAsync(req PipelineRequest) (int64, error) {
 
 	// 创建 running 状态的 history 记录
 	templateIDs, _ := json.Marshal([]int64{analyzerTpl.ID, architectTpl.ID, writerTpl.ID, reviewerTpl.ID})
+	source := req.Source
+	if source == "" {
+		source = "web"
+	}
 	history := &model.History{
-		UserID:      req.UserID,
-		Input:       req.Input,
-		LLMProvider: req.LLMProvider,
-		Status:      "running",
-		CurrentStep: 0,
-		TemplateIDs: templateIDs,
+		UserID:        req.UserID,
+		Input:         req.Input,
+		LLMProvider:   req.LLMProvider,
+		Status:        "running",
+		CurrentStep:   0,
+		TemplateIDs:   templateIDs,
+		Source:        source,
+		WebhookURL:    req.WebhookURL,
 	}
 	if err := p.historyStore.Create(history); err != nil {
 		return 0, fmt.Errorf("create history: %w", err)
@@ -115,6 +129,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 			return
 		}
 		p.historyStore.Fail(historyID, fmt.Sprintf("analyzer: %v", err))
+		p.eventBus.Publish(historyID, Event{Step: 1, Name: "analyzer", Status: "failed", Error: err.Error()})
 		return
 	}
 	if ctx.Err() != nil {
@@ -123,6 +138,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 	p.historyStore.UpdateStep(historyID, 1, map[string]any{
 		"reasoner_output": analyzerOutput,
 	})
+	p.eventBus.Publish(historyID, Event{Step: 1, Name: "analyzer", Status: "done"})
 
 	// 第2层：Architect (step=1)
 	architectOutput, err := p.architect.Run(ctx, req.LLMProvider, architectTpl.Prompt, req.Input, analyzerOutput)
@@ -131,6 +147,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 			return
 		}
 		p.historyStore.Fail(historyID, fmt.Sprintf("architect: %v", err))
+		p.eventBus.Publish(historyID, Event{Step: 2, Name: "architect", Status: "failed", Error: err.Error()})
 		return
 	}
 	if ctx.Err() != nil {
@@ -139,6 +156,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 	p.historyStore.UpdateStep(historyID, 2, map[string]any{
 		"architect_output": architectOutput,
 	})
+	p.eventBus.Publish(historyID, Event{Step: 2, Name: "architect", Status: "done"})
 
 	// 解析蓝图
 	var blueprint struct {
@@ -151,16 +169,18 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 
 	// 第3层：Writer (step=2)
 	writerOutputs := make([]json.RawMessage, 0, len(blueprint.PromptsBlueprint))
-	for _, group := range blueprint.PromptsBlueprint {
+	for i, group := range blueprint.PromptsBlueprint {
 		if ctx.Err() != nil {
 			return
 		}
+		p.eventBus.Publish(historyID, Event{Step: 3, Name: "writer", Status: "running", Progress: fmt.Sprintf("%d/%d", i+1, len(blueprint.PromptsBlueprint))})
 		output, err := p.writer.RunOne(ctx, req.LLMProvider, writerTpl.Prompt, req.Input, analyzerOutput, architectOutput, group, writerOutputs)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			p.historyStore.Fail(historyID, fmt.Sprintf("writer: %v", err))
+			p.eventBus.Publish(historyID, Event{Step: 3, Name: "writer", Status: "failed", Error: err.Error()})
 			return
 		}
 		writerOutputs = append(writerOutputs, output)
@@ -169,6 +189,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 	p.historyStore.UpdateStep(historyID, 3, map[string]any{
 		"generator_output": writerJSON,
 	})
+	p.eventBus.Publish(historyID, Event{Step: 3, Name: "writer", Status: "done"})
 
 	// 第4层：Reviewer (step=3)
 	reviewedOutputs := make([]json.RawMessage, 0, len(writerOutputs))
@@ -176,12 +197,14 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 		if ctx.Err() != nil {
 			return
 		}
+		p.eventBus.Publish(historyID, Event{Step: 4, Name: "reviewer", Status: "running", Progress: fmt.Sprintf("%d/%d", i+1, len(writerOutputs))})
 		reviewed, err := p.reviewer.ReviewOne(ctx, req.LLMProvider, reviewerTpl.Prompt, req.Input, architectOutput, writerOut, i+1, len(writerOutputs), reviewedOutputs)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			p.historyStore.Fail(historyID, fmt.Sprintf("reviewer group %d: %v", i+1, err))
+			p.eventBus.Publish(historyID, Event{Step: 4, Name: "reviewer", Status: "failed", Error: err.Error()})
 			return
 		}
 		reviewedOutputs = append(reviewedOutputs, reviewed)
@@ -200,6 +223,12 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 		"duration_ms":      duration,
 		"current_step":     4,
 	})
+	p.eventBus.Publish(historyID, Event{Step: 5, Name: "done", Status: "done"})
+
+	// Webhook 通知
+	if h, err := p.historyStore.GetByID(historyID); err == nil {
+		go p.webhook.Notify(h)
+	}
 }
 
 func (p *Pipeline) loadTemplate(stage string, id *int64) (*model.Template, error) {

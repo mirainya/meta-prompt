@@ -98,3 +98,9 @@ func (s *HistoryStore) Cancel(id int64, userID int64) error {
 	}
 	return result.Error
 }
+
+func (s *HistoryStore) CountBySource(userID int64, source string) int64 {
+	var count int64
+	s.db.Model(&model.History{}).Where("user_id = ? AND source = ?", userID, source).Count(&count)
+	return count
+}
