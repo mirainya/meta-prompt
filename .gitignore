@@ -1,3 +1,4 @@
+# Binaries
 *.exe
 *.exe~
 *.dll
@@ -6,16 +7,27 @@
 *.test
 *.out
 
-config.yaml
-
+# Build output
+dist/
 cmd/server/dist/
 web/dist/
+meta-prompt
+
+# Dependencies
 web/node_modules/
 
+# Config (contains secrets)
+config.yaml
+
+# IDE
 .idea/
 .vscode/
+
+# Claude Code
 .claude/
 .temp/
+
+# Misc
 *.log
 *.png
 test_output.txt
