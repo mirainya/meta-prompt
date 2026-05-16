@@ -11,13 +11,20 @@ import (
 
 func JWTAuth(authService *service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var tokenStr string
+
 		header := c.GetHeader("Authorization")
-		if header == "" || !strings.HasPrefix(header, "Bearer ") {
+		if header != "" && strings.HasPrefix(header, "Bearer ") {
+			tokenStr = strings.TrimPrefix(header, "Bearer ")
+		} else if t := c.Query("token"); t != "" {
+			tokenStr = t
+		}
+
+		if tokenStr == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid token"})
 			return
 		}
 
-		tokenStr := strings.TrimPrefix(header, "Bearer ")
 		claims, err := authService.ValidateToken(tokenStr)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})

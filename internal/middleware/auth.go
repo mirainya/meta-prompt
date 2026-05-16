@@ -1,17 +1,14 @@
 package middleware
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
-	"meta-prompt/internal/model"
+	"meta-prompt/internal/store"
 )
 
-func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
+func APIKeyAuth(apiKeyStore *store.APIKeyStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.GetHeader("X-API-Key")
 		if key == "" {
@@ -19,14 +16,14 @@ func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
-
-		var apiKey model.APIKey
-		if err := db.Where("key_hash = ? AND is_active = ?", hash, true).First(&apiKey).Error; err != nil {
+		apiKey, err := apiKeyStore.ValidateKey(key)
+		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
 			return
 		}
 
+		c.Set("api_key_id", apiKey.ID)
+		c.Set("user_id", apiKey.UserID)
 		c.Next()
 	}
 }
