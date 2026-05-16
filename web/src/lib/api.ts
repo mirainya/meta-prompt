@@ -114,6 +114,32 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+
+  exportMarkdown: (id: number) =>
+    fetch(`${BASE}/histories/${id}/export?format=markdown`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    }).then((r) => r.text()),
+
+  exportJSON: (id: number) =>
+    fetch(`${BASE}/histories/${id}/export?format=json`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    }).then((r) => r.text()),
+
+  // API Keys
+  listAPIKeys: () => request<APIKeyItem[]>('/api-keys'),
+  createAPIKey: (name: string) => request<{ id: number; name: string; key: string; prefix: string }>('/api-keys', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  }),
+  revokeAPIKey: (id: number) => request<{ message: string }>(`/api-keys/${id}`, { method: 'DELETE' }),
+  apiKeyStats: (id: number) => request<{ id: number; name: string; prefix: string; rate_limit: number; credits_quota: number; is_active: boolean; last_used_at: string | null; total_calls: number }>(`/api-keys/${id}/stats`),
+
+  // 模板版本
+  templateVersions: (id: number) => request<TemplateVersion[]>(`/admin/templates/${id}/versions`),
+  templateRollback: (id: number, version: number) => request<TemplateItem>(`/admin/templates/${id}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  }),
 };
 
 // Types
@@ -212,4 +238,22 @@ export interface TemplateItem {
   is_default: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface APIKeyItem {
+  id: number;
+  prefix: string;
+  name: string;
+  is_active: boolean;
+  rate_limit: number;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface TemplateVersion {
+  id: number;
+  template_id: number;
+  prompt: string;
+  version: number;
+  created_at: string;
 }

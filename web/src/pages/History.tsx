@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api, type HistoryItem } from '../lib/api';
+import { api, type HistoryItem, type ReviewedPrompt } from '../lib/api';
 
 export default function History() {
   const [items, setItems] = useState<HistoryItem[]>([]);
@@ -118,30 +118,94 @@ export default function History() {
 function HistoryDetail({ id }: { id: number }) {
   const [detail, setDetail] = useState<HistoryItem | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   useEffect(() => {
     api.history(id).then(setDetail).finally(() => setLoading(false));
   }, [id]);
 
+  const copyText = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  };
+
   if (loading) {
-    return (
-      <div className="px-5 pb-4 text-sm" style={{ color: 'var(--mp-text-secondary)' }}>加载中...</div>
-    );
+    return <div className="px-5 pb-4 text-sm" style={{ color: 'var(--mp-text-secondary)' }}>加载中...</div>;
   }
   if (!detail) {
+    return <div className="px-5 pb-4 text-sm" style={{ color: 'var(--mp-danger)' }}>加载失败</div>;
+  }
+
+  const reviewer = detail.reviewer_output as { prompts?: ReviewedPrompt[] } | null;
+  const prompts = reviewer?.prompts;
+
+  if (!prompts?.length) {
     return (
-      <div className="px-5 pb-4 text-sm" style={{ color: 'var(--mp-danger)' }}>加载失败</div>
+      <div className="px-5 pb-5">
+        <pre
+          className="text-xs rounded-xl p-4 overflow-auto max-h-96 m-0"
+          style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}
+        >
+          {JSON.stringify(detail.generator_output || detail.reviewer_output, null, 2)}
+        </pre>
+      </div>
     );
   }
 
   return (
-    <div className="px-5 pb-5">
-      <pre
-        className="text-xs rounded-xl p-4 overflow-auto max-h-96 m-0"
-        style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}
-      >
-        {JSON.stringify(detail.generator_output, null, 2)}
-      </pre>
+    <div className="px-5 pb-5 space-y-2">
+      {prompts.map((p, i) => (
+        <div
+          key={i}
+          className="rounded-xl overflow-hidden transition-all"
+          style={{ background: 'var(--mp-primary-lighter)', border: '1px solid var(--mp-border-color)' }}
+        >
+          <div
+            className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+            onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+          >
+            <span
+              className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-semibold"
+              style={{ background: 'var(--mp-primary)', color: '#fff' }}
+            >
+              {p.order}
+            </span>
+            <span className="text-sm font-medium flex-1 min-w-0 truncate" style={{ color: 'var(--mp-text-primary)' }}>
+              {p.name}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); copyText(p.prompt_text, i); }}
+              className="w-7 h-7 rounded-md flex items-center justify-center transition-colors"
+              style={{ color: copiedIdx === i ? 'var(--mp-success)' : 'var(--mp-text-secondary)' }}
+              title="复制"
+            >
+              {copiedIdx === i ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              )}
+            </button>
+            <svg
+              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              style={{ transition: 'transform 0.2s', transform: expandedIdx === i ? 'rotate(180deg)' : '', color: 'var(--mp-text-secondary)' }}
+            >
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
+          {expandedIdx === i && (
+            <div className="px-4 pb-4">
+              <pre
+                className="text-sm whitespace-pre-wrap rounded-lg p-3 m-0 leading-relaxed overflow-auto max-h-80"
+                style={{ background: 'var(--mp-card-bg)', color: 'var(--mp-text-regular)' }}
+              >
+                {p.prompt_text}
+              </pre>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

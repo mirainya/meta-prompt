@@ -28,6 +28,34 @@
   --mp-login-bg: linear-gradient(135deg, #f0ecf6 0%, #e0d8ec 50%, #b8aad0 100%);
 }
 
+.dark {
+  --mp-primary: #b8aad0;
+  --mp-primary-light: #9a8abd;
+  --mp-primary-lighter: rgba(154, 138, 189, 0.12);
+  --mp-accent: #c4b8db;
+  --mp-success: #6abf6a;
+  --mp-warning: #d4b07a;
+  --mp-danger: #e07070;
+
+  --mp-sidebar: linear-gradient(180deg, #1e1a2e 0%, #252038 100%);
+  --mp-sidebar-text: #b8aad0;
+  --mp-sidebar-active-text: #c4b8db;
+  --mp-sidebar-active-bg: rgba(154, 138, 189, 0.15);
+
+  --mp-header-bg: rgba(30, 26, 46, 0.85);
+  --mp-body-bg: #16132a;
+  --mp-card-bg: rgba(37, 32, 56, 0.85);
+  --mp-card-border: rgba(154, 138, 189, 0.15);
+  --mp-card-shadow: 0 2px 16px rgba(0, 0, 0, 0.3);
+
+  --mp-text-primary: #e8e4f0;
+  --mp-text-regular: #c4bdd6;
+  --mp-text-secondary: #8a82a0;
+  --mp-border-color: rgba(154, 138, 189, 0.2);
+
+  --mp-login-bg: linear-gradient(135deg, #1e1a2e 0%, #252038 50%, #3a2d5c 100%);
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type HistoryItem, type ReviewedPrompt, type ProviderItem } from '../lib/api';
 import { useAuth } from '../lib/store';
+import { useToast } from '../components/Toast';
 
 function ModelSelect({ providers, value, onChange, disabled }: {
   providers: ProviderItem[];
@@ -97,6 +98,7 @@ export default function Generate() {
   const [input, setInput] = useState('');
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [provider, setProvider] = useState('');
+  const toast = useToast((s) => s.add);
 
   useEffect(() => {
     api.providers().then((list) => {
@@ -111,6 +113,7 @@ export default function Generate() {
   const [error, setError] = useState('');
   const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollingIdRef = useRef<number | null>(null);
 
@@ -185,7 +188,9 @@ export default function Generate() {
       const res = await api.generate(input, provider);
       startPolling(res.id);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '生成失败');
+      const msg = err instanceof Error ? err.message : '生成失败';
+      setError(msg);
+      toast(msg, 'error');
       setLoading(false);
     }
   };
@@ -328,9 +333,58 @@ export default function Generate() {
             <h3 className="text-base font-semibold" style={{ color: 'var(--mp-text-primary)' }}>
               推演结果
             </h3>
-            <span className="text-xs" style={{ color: 'var(--mp-text-secondary)' }}>
-              {prompts.length} 组 · {((result.duration_ms || 0) / 1000).toFixed(1)}s
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const allText = prompts.map((p, i) => `## ${i + 1}. ${p.name}\n\n${p.prompt_text}`).join('\n\n---\n\n');
+                  navigator.clipboard.writeText(allText);
+                  setCopiedAll(true);
+                  toast('已复制全部提示词', 'success');
+                  setTimeout(() => setCopiedAll(false), 1500);
+                }}
+                className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+                style={{ background: copiedAll ? 'rgba(107,177,107,0.15)' : 'var(--mp-primary-lighter)', color: copiedAll ? 'var(--mp-success)' : 'var(--mp-primary)' }}
+              >
+                {copiedAll ? '已复制 ✓' : '复制全部'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!result?.id) return;
+                  const md = await api.exportMarkdown(result.id);
+                  const blob = new Blob([md], { type: 'text/markdown' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `prompts_${result.id}.md`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+                style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}
+              >
+                导出 MD
+              </button>
+              <button
+                onClick={async () => {
+                  if (!result?.id) return;
+                  const json = await api.exportJSON(result.id);
+                  const blob = new Blob([json], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `prompts_${result.id}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
+                style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}
+              >
+                导出 JSON
+              </button>
+              <span className="text-xs" style={{ color: 'var(--mp-text-secondary)' }}>
+                {prompts.length} 组 · {((result.duration_ms || 0) / 1000).toFixed(1)}s
+              </span>
+            </div>
           </div>
 
           <div

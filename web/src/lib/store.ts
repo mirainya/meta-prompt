@@ -1,5 +1,25 @@
 import { create } from 'zustand';
 
+interface ThemeState {
+  dark: boolean;
+  toggle: () => void;
+}
+
+export const useTheme = create<ThemeState>((set) => {
+  const saved = localStorage.getItem('theme');
+  const dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (dark) document.documentElement.classList.add('dark');
+  return {
+    dark,
+    toggle: () => set((s) => {
+      const next = !s.dark;
+      document.documentElement.classList.toggle('dark', next);
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+      return { dark: next };
+    }),
+  };
+});
+
 interface AuthState {
   token: string | null;
   username: string | null;

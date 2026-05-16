@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { api, type TemplateItem } from '../../lib/api';
+import { api, type TemplateItem, type TemplateVersion } from '../../lib/api';
+import { useToast } from '../../components/Toast';
 
 const STAGE_LABELS: Record<string, string> = {
   analyzer: '分析师',
@@ -17,6 +18,9 @@ export default function Templates() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
+  const [versionsId, setVersionsId] = useState<number | null>(null);
+  const [versions, setVersions] = useState<TemplateVersion[]>([]);
+  const toast = useToast((s) => s.add);
 
   const load = () => api.adminTemplates().then(setTemplates);
   useEffect(() => { load(); }, []);
@@ -33,6 +37,24 @@ export default function Templates() {
     setEditing(t.id);
     setForm({ name: t.name, description: t.description, prompt: t.prompt });
     setMsg('');
+  };
+
+  const showVersions = async (id: number) => {
+    if (versionsId === id) { setVersionsId(null); return; }
+    const list = await api.templateVersions(id);
+    setVersions(list);
+    setVersionsId(id);
+  };
+
+  const rollback = async (templateId: number, version: number) => {
+    try {
+      await api.templateRollback(templateId, version);
+      toast('已回滚到 v' + version, 'success');
+      setVersionsId(null);
+      load();
+    } catch {
+      toast('回滚失败', 'error');
+    }
   };
 
   const save = async () => {
@@ -98,13 +120,22 @@ export default function Templates() {
                   </div>
                 </div>
                 {!isEditing && (
-                  <button
-                    onClick={() => startEdit(t)}
-                    className="h-8 px-4 rounded-lg text-xs font-medium transition-all"
-                    style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}
-                  >
-                    编辑
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => showVersions(t.id)}
+                      className="h-8 px-3 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-secondary)' }}
+                    >
+                      版本
+                    </button>
+                    <button
+                      onClick={() => startEdit(t)}
+                      className="h-8 px-4 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}
+                    >
+                      编辑
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -137,6 +168,34 @@ export default function Templates() {
                       取消
                     </button>
                   </div>
+                </div>
+              )}
+
+              {versionsId === t.id && !isEditing && (
+                <div className="px-5 pb-5">
+                  {versions.length === 0 ? (
+                    <div className="text-xs py-3" style={{ color: 'var(--mp-text-secondary)' }}>暂无历史版本</div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {versions.map((v) => (
+                        <div key={v.id} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'var(--mp-primary-lighter)' }}>
+                          <div>
+                            <span className="text-xs font-medium" style={{ color: 'var(--mp-text-primary)' }}>v{v.version}</span>
+                            <span className="text-xs ml-2" style={{ color: 'var(--mp-text-secondary)' }}>
+                              {new Date(v.created_at).toLocaleString()} · {v.prompt.length} 字符
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => rollback(t.id, v.version)}
+                            className="text-xs px-2 py-1 rounded"
+                            style={{ color: 'var(--mp-primary)' }}
+                          >
+                            回滚
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
