@@ -39,8 +39,9 @@ type LLMConfig struct {
 }
 
 type DefaultsConfig struct {
-	LLMProvider string  `mapstructure:"llm_provider"`
-	Temperature float64 `mapstructure:"temperature"`
+	LLMProvider  string  `mapstructure:"llm_provider"`
+	DefaultModel string  `mapstructure:"default_model"`
+	Temperature  float64 `mapstructure:"temperature"`
 }
 
 func (d DatabaseConfig) DSN() string {

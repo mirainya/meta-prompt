@@ -33,7 +33,7 @@ func (h *DocsHandler) OpenAPISpec(c *gin.Context) {
 			"/generate": gin.H{
 				"post": gin.H{
 					"summary":     "创建推演任务",
-					"description": "提交需求文本，异步生成提示词。消耗 1 积分。",
+					"description": "提交需求文本，异步生成提示词。按模型定价消耗积分。",
 					"requestBody": gin.H{
 						"required": true,
 						"content": gin.H{
@@ -42,10 +42,10 @@ func (h *DocsHandler) OpenAPISpec(c *gin.Context) {
 									"type":     "object",
 									"required": []string{"input"},
 									"properties": gin.H{
-										"input":        gin.H{"type": "string", "description": "需求描述"},
-										"llm_provider": gin.H{"type": "string", "description": "LLM 提供商（可选，默认使用系统配置）"},
-										"mode":         gin.H{"type": "string", "enum": []string{"sync", "async"}, "description": "sync=同步等待结果，async=立即返回 task_id（默认）"},
-										"webhook_url":  gin.H{"type": "string", "description": "完成后回调地址（可选）"},
+										"input":       gin.H{"type": "string", "description": "需求描述"},
+										"model":       gin.H{"type": "string", "description": "模型代码（可选，通过 /models 获取可用列表）"},
+										"mode":        gin.H{"type": "string", "enum": []string{"sync", "async"}, "description": "sync=同步等待结果，async=立即返回 task_id（默认）"},
+										"webhook_url": gin.H{"type": "string", "description": "完成后回调地址（可选）"},
 									},
 								},
 							},
@@ -98,10 +98,10 @@ func (h *DocsHandler) OpenAPISpec(c *gin.Context) {
 					},
 				},
 			},
-			"/providers": gin.H{
+			"/models": gin.H{
 				"get": gin.H{
 					"summary":     "获取可用模型列表",
-					"description": "返回当前已启用的 LLM 提供商及其模型。",
+					"description": "返回当前已启用的模型列表，包含 code、type、credits_per_call。",
 				},
 			},
 		},

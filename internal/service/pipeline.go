@@ -14,7 +14,7 @@ import (
 type PipelineRequest struct {
 	Input               string
 	UserID              int64
-	LLMProvider         string
+	Model               string
 	Source              string
 	WebhookURL          string
 	AnalyzerTemplateID  *int64
@@ -90,7 +90,7 @@ func (p *Pipeline) ExecuteAsync(req PipelineRequest) (int64, error) {
 	history := &model.History{
 		UserID:        req.UserID,
 		Input:         req.Input,
-		LLMProvider:   req.LLMProvider,
+		LLMProvider:   req.Model,
 		Status:        "running",
 		CurrentStep:   0,
 		TemplateIDs:   templateIDs,
@@ -123,7 +123,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 	start := time.Now()
 
 	// 第1层：Analyzer (step=0)
-	analyzerOutput, err := p.analyzer.Run(ctx, req.LLMProvider, analyzerTpl.Prompt, req.Input)
+	analyzerOutput, err := p.analyzer.Run(ctx, req.Model, analyzerTpl.Prompt, req.Input)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -141,7 +141,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 	p.eventBus.Publish(historyID, Event{Step: 1, Name: "analyzer", Status: "done"})
 
 	// 第2层：Architect (step=1)
-	architectOutput, err := p.architect.Run(ctx, req.LLMProvider, architectTpl.Prompt, req.Input, analyzerOutput)
+	architectOutput, err := p.architect.Run(ctx, req.Model, architectTpl.Prompt, req.Input, analyzerOutput)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -174,7 +174,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 			return
 		}
 		p.eventBus.Publish(historyID, Event{Step: 3, Name: "writer", Status: "running", Progress: fmt.Sprintf("%d/%d", i+1, len(blueprint.PromptsBlueprint))})
-		output, err := p.writer.RunOne(ctx, req.LLMProvider, writerTpl.Prompt, req.Input, analyzerOutput, architectOutput, group, writerOutputs)
+		output, err := p.writer.RunOne(ctx, req.Model, writerTpl.Prompt, req.Input, analyzerOutput, architectOutput, group, writerOutputs)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -198,7 +198,7 @@ func (p *Pipeline) executeInBackground(historyID int64, req PipelineRequest, ana
 			return
 		}
 		p.eventBus.Publish(historyID, Event{Step: 4, Name: "reviewer", Status: "running", Progress: fmt.Sprintf("%d/%d", i+1, len(writerOutputs))})
-		reviewed, err := p.reviewer.ReviewOne(ctx, req.LLMProvider, reviewerTpl.Prompt, req.Input, architectOutput, writerOut, i+1, len(writerOutputs), reviewedOutputs)
+		reviewed, err := p.reviewer.ReviewOne(ctx, req.Model, reviewerTpl.Prompt, req.Input, architectOutput, writerOut, i+1, len(writerOutputs), reviewedOutputs)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

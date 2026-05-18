@@ -68,3 +68,11 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--mp-border-color); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--mp-primary-light); }
+
+button {
+  transition: transform 0.1s, opacity 0.1s;
+}
+button:active:not(:disabled) {
+  transform: scale(0.95);
+  opacity: 0.8;
+}

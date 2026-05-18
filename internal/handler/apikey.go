@@ -56,6 +56,7 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 
 	key := &model.APIKey{
 		KeyHash:  hash,
+		RawKey:   rawKey,
 		Prefix:   rawKey[:8],
 		Name:     req.Name,
 		UserID:   userID,
@@ -114,6 +115,7 @@ func (h *APIKeyHandler) AdminCreate(c *gin.Context) {
 
 	key := &model.APIKey{
 		KeyHash:   hash,
+		RawKey:    rawKey,
 		Prefix:    rawKey[:8],
 		Name:      req.Name,
 		UserID:    req.UserID,

@@ -1,263 +1,222 @@
 import { useState, useEffect } from 'react';
-import { api, type LLMConfigItem } from '../../lib/api';
-
-const TYPE_OPTIONS = [
-  { value: 'openai_compatible', label: 'OpenAI 兼容' },
-  { value: 'claude', label: 'Claude' },
-  { value: 'gemini', label: 'Gemini' },
-];
+import { api, type ChannelSource, type ChannelModel } from '../../lib/api';
+import { useToast } from '../../components/Toast';
 
 export default function LLMConfig() {
-  const [configs, setConfigs] = useState<LLMConfigItem[]>([]);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm] = useState<Partial<LLMConfigItem>>({});
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [msgType, setMsgType] = useState<'ok' | 'err'>('ok');
-  const [testing, setTesting] = useState<string | null>(null);
+  const [sources, setSources] = useState<ChannelSource[]>([]);
+  const [models, setModels] = useState<ChannelModel[]>([]);
+  const [tab, setTab] = useState<'sources' | 'models'>('sources');
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ provider: '', type: 'openai_compatible', api_key: '', base_url: '', model: '', max_tokens: 4096, enabled: true });
+  const [syncing, setSyncing] = useState<number | null>(null);
+  const [addForm, setAddForm] = useState({ name: '', base_url: '', api_key: '', proxy_url: '' });
+  const [saving, setSaving] = useState(false);
+  const toast = useToast((s) => s.add);
 
-  const load = () => api.adminLLMConfigs().then(setConfigs);
-  useEffect(() => { load(); }, []);
-
-  const flash = (text: string, type: 'ok' | 'err' = 'ok') => { setMsg(text); setMsgType(type); };
-
-  const startEdit = (cfg: LLMConfigItem) => {
-    setEditing(cfg.provider);
-    setForm({ type: cfg.type, api_key: '', base_url: cfg.base_url, model: cfg.model, max_tokens: cfg.max_tokens, enabled: cfg.enabled });
-    setMsg('');
-    setShowAdd(false);
-  };
-
-  const save = async () => {
-    if (!editing) return;
-    setSaving(true);
-    setMsg('');
-    try {
-      const data: Record<string, unknown> = {};
-      if (form.type !== undefined) data.type = form.type;
-      if (form.api_key) data.api_key = form.api_key;
-      if (form.base_url !== undefined) data.base_url = form.base_url;
-      if (form.model !== undefined) data.model = form.model;
-      if (form.max_tokens !== undefined) data.max_tokens = form.max_tokens;
-      if (form.enabled !== undefined) data.enabled = form.enabled;
-      await api.adminUpdateLLMConfig(editing, data as Partial<LLMConfigItem>);
-      flash('保存成功');
-      setEditing(null);
-      load();
-    } catch (err: unknown) {
-      flash(err instanceof Error ? err.message : '保存失败', 'err');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const loadSources = () => api.adminChannelSources().then(setSources);
+  const loadModels = () => api.adminChannelModels().then(setModels);
+  useEffect(() => { loadSources(); loadModels(); }, []);
 
   const handleAdd = async () => {
-    if (!addForm.provider.trim() || !addForm.model.trim()) { flash('名称和模型不能为空', 'err'); return; }
+    if (!addForm.name.trim() || !addForm.base_url.trim()) { toast('名称和地址不能为空', 'error'); return; }
     setSaving(true);
     try {
-      await api.adminCreateLLMConfig(addForm);
-      flash('添加成功');
+      await api.adminCreateSource(addForm);
+      toast('添加成功', 'success');
       setShowAdd(false);
-      setAddForm({ provider: '', type: 'openai_compatible', api_key: '', base_url: '', model: '', max_tokens: 4096, enabled: true });
-      load();
+      setAddForm({ name: '', base_url: '', api_key: '', proxy_url: '' });
+      loadSources();
     } catch (err: unknown) {
-      flash(err instanceof Error ? err.message : '添加失败', 'err');
-    } finally {
-      setSaving(false);
-    }
+      toast(err instanceof Error ? err.message : '添加失败', 'error');
+    } finally { setSaving(false); }
   };
 
-  const handleTest = async (provider: string) => {
-    setTesting(provider);
-    flash('');
+  const handleSync = async (id: number) => {
+    setSyncing(id);
     try {
-      const res = await api.adminTestLLMConfig(provider);
-      flash(res.success ? `测试成功：${res.reply}` : `测试失败：${res.error}`, res.success ? 'ok' : 'err');
+      const res = await api.adminSyncSource(id);
+      toast(`同步成功，${res.synced} 个 chat 模型（共 ${res.total} 个）`, 'success');
+      loadModels();
     } catch (err: unknown) {
-      flash(err instanceof Error ? err.message : '测试失败', 'err');
-    } finally {
-      setTesting(null);
-    }
+      toast(err instanceof Error ? err.message : '同步失败', 'error');
+    } finally { setSyncing(null); }
   };
 
-  const handleDelete = async (provider: string) => {
-    if (!confirm(`确定删除 ${provider}？`)) return;
-    try {
-      await api.adminDeleteLLMConfig(provider);
-      flash('已删除');
-      load();
-    } catch (err: unknown) {
-      flash(err instanceof Error ? err.message : '删除失败', 'err');
-    }
+  const handleDelete = async (id: number) => {
+    if (!confirm('确定删除此渠道源？关联的模型也会被删除。')) return;
+    await api.adminDeleteSource(id);
+    loadSources();
+    loadModels();
   };
 
-  const inputStyle = {
-    border: '1px solid var(--mp-border-color)',
-    background: 'var(--mp-primary-lighter)',
-    color: 'var(--mp-text-primary)',
+  const handleToggleModel = async (m: ChannelModel) => {
+    await api.adminUpdateModel(m.id, { enabled: !m.enabled });
+    loadModels();
   };
+
+  const handleBillingChange = async (m: ChannelModel, billing_type: string) => {
+    await api.adminUpdateModel(m.id, { billing_type });
+    loadModels();
+  };
+
+  const handleCreditsChange = async (m: ChannelModel, credits: number) => {
+    await api.adminUpdateModel(m.id, { credits_per_call: credits });
+    loadModels();
+  };
+
+  const handleTokenPriceChange = async (m: ChannelModel, field: 'input_token_price' | 'output_token_price', price: number) => {
+    await api.adminUpdateModel(m.id, { [field]: price });
+    loadModels();
+  };
+
+  const handleSetDefault = async (m: ChannelModel) => {
+    await api.adminUpdateModel(m.id, { is_default: true });
+    loadModels();
+  };
+
+  const inputStyle = { background: 'var(--mp-primary-lighter)', border: '1px solid var(--mp-border-color)', color: 'var(--mp-text-primary)' };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold" style={{ color: 'var(--mp-text-primary)' }}>模型配置</h2>
-        <button
-          onClick={() => { setShowAdd(!showAdd); setEditing(null); setMsg(''); }}
-          className="h-8 px-4 rounded-lg text-white text-xs font-medium transition-all"
-          style={{ background: 'var(--mp-primary)' }}
-        >
-          + 添加模型
-        </button>
+    <div className="max-w-5xl mx-auto space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--mp-text-primary)' }}>渠道管理</h2>
+          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--mp-border-color)' }}>
+            <button onClick={() => setTab('sources')} className="px-3 py-1.5 text-xs font-medium" style={{ background: tab === 'sources' ? 'var(--mp-primary)' : 'transparent', color: tab === 'sources' ? '#fff' : 'var(--mp-text-secondary)' }}>渠道源</button>
+            <button onClick={() => setTab('models')} className="px-3 py-1.5 text-xs font-medium" style={{ background: tab === 'models' ? 'var(--mp-primary)' : 'transparent', color: tab === 'models' ? '#fff' : 'var(--mp-text-secondary)' }}>模型列表</button>
+          </div>
+        </div>
+        {tab === 'sources' && (
+          <button onClick={() => setShowAdd(true)} className="h-9 px-4 rounded-xl text-sm font-medium text-white" style={{ background: 'var(--mp-primary)' }}>+ 添加渠道</button>
+        )}
       </div>
 
-      {msg && (
-        <div className="rounded-xl px-4 py-2 mb-4 text-sm" style={{
-          background: msgType === 'ok' ? 'rgba(139, 189, 139, 0.1)' : 'rgba(220, 100, 100, 0.1)',
-          color: msgType === 'ok' ? 'var(--mp-success)' : '#dc6464',
-        }}>
-          {msg}
+      {tab === 'sources' && (
+        <div className="space-y-3">
+          {sources.length === 0 && (
+            <div className="rounded-2xl p-8 text-center text-sm" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-card-border)', color: 'var(--mp-text-secondary)' }}>暂无渠道源，点击右上角添加</div>
+          )}
+          {sources.map((s) => (
+            <div key={s.id} className="rounded-xl p-4" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-card-border)' }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium" style={{ color: 'var(--mp-text-primary)' }}>{s.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handleSync(s.id)} disabled={syncing === s.id} className="h-7 px-3 rounded-lg text-xs font-medium text-white disabled:opacity-50" style={{ background: '#10b981' }}>
+                    {syncing === s.id ? '同步中...' : '同步模型'}
+                  </button>
+                  <button onClick={() => handleDelete(s.id)} className="h-7 px-3 rounded-lg text-xs font-medium" style={{ background: '#fee2e2', color: '#dc2626' }}>删除</button>
+                </div>
+              </div>
+              <div className="mt-2 text-xs" style={{ color: 'var(--mp-text-secondary)' }}>{s.base_url}</div>
+            </div>
+          ))}
         </div>
       )}
 
+      {tab === 'models' && (
+        <div>
+          {models.length === 0 ? (
+            <div className="rounded-2xl p-8 text-center text-sm" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-card-border)', color: 'var(--mp-text-secondary)' }}>暂无模型，请先添加渠道源并点击「同步模型」</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {models.map((m) => (
+                <div key={m.id} className="rounded-2xl p-4 space-y-3 relative" style={{ background: 'var(--mp-card-bg)', border: m.is_default ? '2px solid var(--mp-primary)' : '1px solid var(--mp-card-border)' }}>
+                  {m.is_default && (
+                    <span className="absolute top-2 right-2 text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--mp-primary)', color: '#fff' }}>默认</span>
+                  )}
+                  <div>
+                    <div className="text-sm font-medium truncate" style={{ color: 'var(--mp-text-primary)' }}>{m.code}</div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--mp-text-secondary)' }}>{m.source_name}</div>
+                  </div>
+
+                  {/* 计费模式 */}
+                  <div>
+                    <div className="text-xs mb-1.5" style={{ color: 'var(--mp-text-secondary)' }}>计费模式</div>
+                    <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--mp-border-color)' }}>
+                      <button onClick={() => handleBillingChange(m, 'per_call')} className="flex-1 px-2 py-1 text-xs" style={{ background: m.billing_type === 'per_call' ? 'var(--mp-primary)' : 'transparent', color: m.billing_type === 'per_call' ? '#fff' : 'var(--mp-text-secondary)' }}>按次</button>
+                      <button onClick={() => handleBillingChange(m, 'per_token')} className="flex-1 px-2 py-1 text-xs" style={{ background: m.billing_type === 'per_token' ? 'var(--mp-primary)' : 'transparent', color: m.billing_type === 'per_token' ? '#fff' : 'var(--mp-text-secondary)' }}>按Token</button>
+                    </div>
+                  </div>
+
+                  {/* 价格 */}
+                  <div>
+                    {m.billing_type === 'per_token' ? (
+                      <div className="space-y-2">
+                        <div>
+                          <div className="text-xs mb-1" style={{ color: 'var(--mp-text-secondary)' }}>输入积分/千Token</div>
+                          <input type="number" className="w-full h-7 px-2 rounded-lg text-xs outline-none" style={inputStyle} defaultValue={m.input_token_price} key={`${m.id}-in`} onBlur={(e) => { const v = Number(e.target.value); if (v >= 0) handleTokenPriceChange(m, 'input_token_price', v); }} />
+                        </div>
+                        <div>
+                          <div className="text-xs mb-1" style={{ color: 'var(--mp-text-secondary)' }}>输出积分/千Token</div>
+                          <input type="number" className="w-full h-7 px-2 rounded-lg text-xs outline-none" style={inputStyle} defaultValue={m.output_token_price} key={`${m.id}-out`} onBlur={(e) => { const v = Number(e.target.value); if (v >= 0) handleTokenPriceChange(m, 'output_token_price', v); }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-xs mb-1.5" style={{ color: 'var(--mp-text-secondary)' }}>积分/次</div>
+                        <input type="number" className="w-full h-7 px-2 rounded-lg text-xs outline-none" style={inputStyle} defaultValue={m.credits_per_call} key={`${m.id}-call`} onBlur={(e) => { const v = Number(e.target.value); if (v >= 0) handleCreditsChange(m, v); }} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 操作 */}
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      onClick={() => handleToggleModel(m)}
+                      className="text-xs px-2.5 py-1 rounded-lg"
+                      style={{ background: m.enabled ? '#dcfce7' : '#f3f4f6', color: m.enabled ? '#166534' : '#6b7280' }}
+                    >
+                      {m.enabled ? '已启用' : '已禁用'}
+                    </button>
+                    {!m.is_default && (
+                      <button
+                        onClick={() => handleSetDefault(m)}
+                        className="text-xs px-2.5 py-1 rounded-lg"
+                        style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}
+                      >
+                        设为默认
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 添加渠道弹窗 */}
       {showAdd && (
-        <div className="rounded-2xl p-5 mb-4" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-card-border)', boxShadow: 'var(--mp-card-shadow)' }}>
-          <div className="text-sm font-semibold mb-3" style={{ color: 'var(--mp-text-primary)' }}>添加新模型</div>
-          <div className="grid grid-cols-2 gap-3">
+        <div className="fixed inset-0 flex items-center justify-center z-50">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowAdd(false)} />
+          <div className="relative w-[420px] rounded-2xl p-6 space-y-4" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-card-border)' }}>
+            <h3 className="text-base font-semibold" style={{ color: 'var(--mp-text-primary)' }}>添加渠道源</h3>
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>名称（唯一标识）</label>
-              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={addForm.provider} onChange={(e) => setAddForm({ ...addForm, provider: e.target.value })} placeholder="如 deepseek" />
-            </div>
-            <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>协议类型</label>
-              <select className="w-full h-9 px-3 rounded-lg text-sm outline-none cursor-pointer" style={inputStyle} value={addForm.type} onChange={(e) => setAddForm({ ...addForm, type: e.target.value })}>
-                {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>API Key</label>
-              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} type="password" value={addForm.api_key} onChange={(e) => setAddForm({ ...addForm, api_key: e.target.value })} />
+              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>名称</label>
+              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} placeholder="例如：Prism 主渠道" />
             </div>
             <div>
               <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>Base URL</label>
-              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={addForm.base_url} onChange={(e) => setAddForm({ ...addForm, base_url: e.target.value })} placeholder="留空使用默认" />
+              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={addForm.base_url} onChange={(e) => setAddForm({ ...addForm, base_url: e.target.value })} placeholder="https://api.example.com" />
             </div>
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>模型名</label>
-              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={addForm.model} onChange={(e) => setAddForm({ ...addForm, model: e.target.value })} placeholder="如 deepseek-chat" />
+              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>API Key</label>
+              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} type="password" value={addForm.api_key} onChange={(e) => setAddForm({ ...addForm, api_key: e.target.value })} placeholder="sk-..." />
             </div>
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>Max Tokens</label>
-              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} type="number" value={addForm.max_tokens} onChange={(e) => setAddForm({ ...addForm, max_tokens: Number(e.target.value) })} />
+              <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>代理地址（可选）</label>
+              <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={addForm.proxy_url} onChange={(e) => setAddForm({ ...addForm, proxy_url: e.target.value })} placeholder="http://proxy:port" />
             </div>
-          </div>
-          <div className="flex items-center gap-3 mt-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={addForm.enabled} onChange={(e) => setAddForm({ ...addForm, enabled: e.target.checked })} className="accent-[var(--mp-primary)]" />
-              <span className="text-sm" style={{ color: 'var(--mp-text-regular)' }}>启用</span>
-            </label>
-            <div className="flex-1" />
-            <button onClick={handleAdd} disabled={saving} className="h-8 px-5 rounded-lg text-white text-xs font-medium disabled:opacity-50" style={{ background: 'var(--mp-primary)' }}>
-              {saving ? '添加中...' : '添加'}
-            </button>
-            <button onClick={() => setShowAdd(false)} className="h-8 px-5 rounded-lg text-xs font-medium" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}>
-              取消
-            </button>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowAdd(false)} className="h-9 px-4 rounded-xl text-sm" style={{ color: 'var(--mp-text-secondary)' }}>取消</button>
+              <button onClick={handleAdd} disabled={saving} className="h-9 px-5 rounded-xl text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--mp-primary)' }}>
+                {saving ? '添加中...' : '添加'}
+              </button>
+            </div>
           </div>
         </div>
       )}
-
-      <div className="space-y-4">
-        {configs.map((cfg) => {
-          const isEditing = editing === cfg.provider;
-          const typeLabel = TYPE_OPTIONS.find((t) => t.value === cfg.type)?.label || cfg.type;
-
-          return (
-            <div key={cfg.provider} className="rounded-2xl overflow-hidden transition-all" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-card-border)', boxShadow: 'var(--mp-card-shadow)' }}>
-              <div className="px-5 py-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold" style={{ background: cfg.enabled ? 'var(--mp-primary)' : 'var(--mp-text-secondary)' }}>
-                    {cfg.provider.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold" style={{ color: 'var(--mp-text-primary)' }}>{cfg.provider}</div>
-                    <div className="text-xs" style={{ color: 'var(--mp-text-secondary)' }}>
-                      {typeLabel} · {cfg.model} · {cfg.enabled ? '已启用' : '已禁用'}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleTest(cfg.provider)}
-                    disabled={testing === cfg.provider}
-                    className="h-8 px-3 rounded-lg text-xs font-medium transition-all disabled:opacity-50"
-                    style={{ border: '1px solid var(--mp-border-color)', color: 'var(--mp-text-regular)' }}
-                  >
-                    {testing === cfg.provider ? '测试中...' : '测试'}
-                  </button>
-                  <button
-                    onClick={() => startEdit(cfg)}
-                    className="h-8 px-3 rounded-lg text-xs font-medium transition-all"
-                    style={{ border: '1px solid var(--mp-border-color)', color: 'var(--mp-text-regular)' }}
-                  >
-                    编辑
-                  </button>
-                  <button
-                    onClick={() => handleDelete(cfg.provider)}
-                    className="h-8 px-3 rounded-lg text-xs font-medium transition-all"
-                    style={{ border: '1px solid #dc6464', color: '#dc6464' }}
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-
-              {isEditing && (
-                <div className="px-5 pb-5 space-y-3 border-t" style={{ borderColor: 'var(--mp-card-border)' }}>
-                  <div className="grid grid-cols-2 gap-3 pt-3">
-                    <div>
-                      <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>协议类型</label>
-                      <select className="w-full h-9 px-3 rounded-lg text-sm outline-none cursor-pointer" style={inputStyle} value={form.type || cfg.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                        {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>API Key</label>
-                      <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} type="password" placeholder="留空不修改" value={form.api_key || ''} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>Base URL</label>
-                      <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={form.base_url || ''} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>模型名</label>
-                      <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} value={form.model || ''} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="text-xs mb-1 block" style={{ color: 'var(--mp-text-secondary)' }}>Max Tokens</label>
-                      <input className="w-full h-9 px-3 rounded-lg text-sm outline-none" style={inputStyle} type="number" value={form.max_tokens || 4096} onChange={(e) => setForm({ ...form, max_tokens: Number(e.target.value) })} />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={form.enabled ?? true} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} className="accent-[var(--mp-primary)]" />
-                      <span className="text-sm" style={{ color: 'var(--mp-text-regular)' }}>启用</span>
-                    </label>
-                    <div className="flex-1" />
-                    <button onClick={save} disabled={saving} className="h-8 px-5 rounded-lg text-white text-xs font-medium disabled:opacity-50" style={{ background: 'var(--mp-primary)' }}>
-                      {saving ? '保存中...' : '保存'}
-                    </button>
-                    <button onClick={() => setEditing(null)} className="h-8 px-5 rounded-lg text-xs font-medium" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}>
-                      取消
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

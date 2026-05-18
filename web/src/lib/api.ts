@@ -41,13 +41,13 @@ export const api = {
 
   me: () => request<{ id: number; username: string; credits: number; role: string }>('/user/me'),
 
-  // 获取已启用的 provider 列表
-  providers: () => request<ProviderItem[]>('/providers'),
+  // 获取可用模型列表
+  providers: () => request<ProviderItem[]>('/models'),
 
-  generate: (input: string, llmProvider?: string) =>
+  generate: (input: string, model?: string) =>
     request<{ id: number }>('/generate', {
       method: 'POST',
-      body: JSON.stringify({ input, llm_provider: llmProvider }),
+      body: JSON.stringify({ input, model }),
     }),
 
   histories: (limit = 20, offset = 0) =>
@@ -63,30 +63,28 @@ export const api = {
   // Admin
   adminDashboard: () => request<AdminDashboard>('/admin/dashboard'),
 
-  adminLLMConfigs: () => request<LLMConfigItem[]>('/admin/llm-configs'),
+  // 渠道管理
+  adminChannelSources: () => request<ChannelSource[]>('/admin/channels/sources'),
 
-  adminCreateLLMConfig: (data: CreateLLMConfigData) =>
-    request<{ message: string }>('/admin/llm-configs', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  adminCreateSource: (data: { name: string; base_url: string; api_key: string; proxy_url?: string }) =>
+    request<ChannelSource>('/admin/channels/sources', { method: 'POST', body: JSON.stringify(data) }),
 
-  adminUpdateLLMConfig: (provider: string, data: Partial<LLMConfigItem>) =>
-    request<{ message: string }>(`/admin/llm-configs/${provider}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
+  adminUpdateSource: (id: number, data: Partial<ChannelSource>) =>
+    request<{ message: string }>(`/admin/channels/sources/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
-  adminDeleteLLMConfig: (provider: string) =>
-    request<{ message: string }>(`/admin/llm-configs/${provider}`, { method: 'DELETE' }),
+  adminDeleteSource: (id: number) =>
+    request<{ message: string }>(`/admin/channels/sources/${id}`, { method: 'DELETE' }),
 
-  adminTestLLMConfig: (provider: string) =>
-    request<{ success: boolean; reply?: string; error?: string }>(`/admin/llm-configs/${provider}/test`, {
-      method: 'POST',
-    }),
+  adminSyncSource: (id: number) =>
+    request<{ synced: number; total: number }>(`/admin/channels/sources/${id}/sync`, { method: 'POST' }),
+
+  adminChannelModels: () => request<ChannelModel[]>('/admin/channels/models'),
+
+  adminUpdateModel: (id: number, data: { enabled?: boolean; credits_per_call?: number; billing_type?: string; input_token_price?: number; output_token_price?: number; is_default?: boolean }) =>
+    request<{ message: string }>(`/admin/channels/models/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   adminUsers: (limit = 50, offset = 0) =>
-    request<{ users: AdminUser[]; total: number }>(`/admin/users?limit=${limit}&offset=${offset}`),
+    request<AdminUser[]>(`/admin/users?limit=${limit}&offset=${offset}`),
 
   adminSetCredits: (id: number, credits: number) =>
     request<{ message: string }>(`/admin/users/${id}/credits`, {
@@ -101,6 +99,12 @@ export const api = {
     request<{ message: string }>(`/admin/users/${id}/reset-password`, {
       method: 'PUT',
       body: JSON.stringify({ password }),
+    }),
+
+  adminSetUserModels: (id: number, models: string[]) =>
+    request<{ message: string }>(`/admin/users/${id}/models`, {
+      method: 'PUT',
+      body: JSON.stringify({ models }),
     }),
 
   adminTemplates: (stage?: string) =>
@@ -144,8 +148,13 @@ export const api = {
 
 // Types
 export interface ProviderItem {
-  provider: string;
-  model: string;
+  code: string;
+  type: string;
+  billing_type: string;
+  credits_per_call: number;
+  input_token_price: number;
+  output_token_price: number;
+  is_default: boolean;
 }
 
 export interface ReviewedPrompt {
@@ -198,24 +207,27 @@ export interface AdminDashboard {
   today_generations: number;
 }
 
-export interface LLMConfigItem {
-  provider: string;
-  type: string;
-  api_key: string;
+export interface ChannelSource {
+  id: number;
+  name: string;
   base_url: string;
-  model: string;
-  max_tokens: number;
-  enabled: boolean;
+  api_key: string;
+  proxy_url: string;
+  created_at: string;
 }
 
-export interface CreateLLMConfigData {
-  provider: string;
+export interface ChannelModel {
+  id: number;
+  source_id: number;
+  source_name: string;
+  code: string;
   type: string;
-  api_key: string;
-  base_url: string;
-  model: string;
-  max_tokens: number;
+  billing_type: string;
   enabled: boolean;
+  credits_per_call: number;
+  input_token_price: number;
+  output_token_price: number;
+  is_default: boolean;
 }
 
 export interface AdminUser {
@@ -224,6 +236,7 @@ export interface AdminUser {
   role: string;
   credits: number;
   disabled: boolean;
+  allowed_models: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -243,6 +256,7 @@ export interface TemplateItem {
 export interface APIKeyItem {
   id: number;
   prefix: string;
+  raw_key: string;
   name: string;
   is_active: boolean;
   rate_limit: number;

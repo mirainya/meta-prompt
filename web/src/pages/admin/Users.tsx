@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api, type AdminUser } from '../../lib/api';
+import { api, type AdminUser, type ChannelModel } from '../../lib/api';
 
 export default function Users() {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -7,17 +7,19 @@ export default function Users() {
   const [loading, setLoading] = useState(true);
   const [editCredits, setEditCredits] = useState<{ id: number; value: string } | null>(null);
   const [resetPwd, setResetPwd] = useState<{ id: number; value: string } | null>(null);
+  const [editModels, setEditModels] = useState<{ id: number; selected: string[] } | null>(null);
+  const [allModels, setAllModels] = useState<ChannelModel[]>([]);
   const [msg, setMsg] = useState('');
 
   const load = () => {
     setLoading(true);
-    api.adminUsers(100, 0).then((res) => {
-      setUsers(res.users);
-      setTotal(res.total);
+    api.adminUsers(100, 0).then((list) => {
+      setUsers(list);
+      setTotal(list.length);
     }).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.adminChannelModels().then(setAllModels); }, []);
 
   const handleSetCredits = async (id: number, credits: number) => {
     try {
@@ -45,6 +47,17 @@ export default function Users() {
       await api.adminResetPassword(id, password);
       setResetPwd(null);
       setMsg('密码已重置');
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const handleSetModels = async (id: number, models: string[]) => {
+    try {
+      await api.adminSetUserModels(id, models);
+      setEditModels(null);
+      setMsg('可用模型已更新');
+      load();
     } catch (err: unknown) {
       setMsg(err instanceof Error ? err.message : '操作失败');
     }
@@ -199,6 +212,13 @@ export default function Users() {
                         重置密码
                       </button>
                     )}
+                    <button
+                      onClick={() => setEditModels({ id: u.id, selected: u.allowed_models || [] })}
+                      className="text-xs px-2 py-1 rounded transition-all"
+                      style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}
+                    >
+                      模型{u.allowed_models?.length ? `(${u.allowed_models.length})` : '(全部)'}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -206,6 +226,51 @@ export default function Users() {
           </tbody>
         </table>
       </div>
+
+      {/* 模型限制弹窗 */}
+      {editModels && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setEditModels(null)}>
+          <div className="rounded-2xl p-5 w-80 max-h-96 overflow-y-auto" style={{ background: 'var(--mp-card-bg)', border: '1px solid var(--mp-border-color)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-semibold mb-3" style={{ color: 'var(--mp-text-primary)' }}>
+              可用模型（不选 = 全部可用）
+            </div>
+            {allModels.filter(m => m.enabled).map((m) => (
+              <label key={m.id} className="flex items-center gap-2 py-1.5 text-xs cursor-pointer" style={{ color: 'var(--mp-text-regular)' }}>
+                <input
+                  type="checkbox"
+                  checked={editModels.selected.includes(m.code)}
+                  onChange={(e) => {
+                    setEditModels((prev) => {
+                      if (!prev) return prev;
+                      const selected = e.target.checked
+                        ? [...prev.selected, m.code]
+                        : prev.selected.filter((c) => c !== m.code);
+                      return { ...prev, selected };
+                    });
+                  }}
+                />
+                {m.code}
+              </label>
+            ))}
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => handleSetModels(editModels.id, editModels.selected)}
+                className="flex-1 h-8 rounded-lg text-xs font-medium"
+                style={{ background: 'var(--mp-primary)', color: '#fff' }}
+              >
+                保存
+              </button>
+              <button
+                onClick={() => setEditModels(null)}
+                className="flex-1 h-8 rounded-lg text-xs"
+                style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -12,19 +12,20 @@ import (
 )
 
 type GenerateHandler struct {
-	pipeline        *service.Pipeline
-	defaultProvider string
-	userStore       *store.UserStore
-	historyStore    *store.HistoryStore
+	pipeline     *service.Pipeline
+	userStore    *store.UserStore
+	historyStore *store.HistoryStore
+	channelStore *store.ChannelStore
+	defaultModel string
 }
 
-func NewGenerateHandler(p *service.Pipeline, defaultProvider string, us *store.UserStore, hs *store.HistoryStore) *GenerateHandler {
-	return &GenerateHandler{pipeline: p, defaultProvider: defaultProvider, userStore: us, historyStore: hs}
+func NewGenerateHandler(p *service.Pipeline, defaultModel string, us *store.UserStore, hs *store.HistoryStore, cs *store.ChannelStore) *GenerateHandler {
+	return &GenerateHandler{pipeline: p, defaultModel: defaultModel, userStore: us, historyStore: hs, channelStore: cs}
 }
 
 type GenerateRequest struct {
 	Input               string `json:"input" binding:"required"`
-	LLMProvider         string `json:"llm_provider"`
+	Model               string `json:"model"`
 	AnalyzerTemplateID  *int64 `json:"analyzer_template_id"`
 	ArchitectTemplateID *int64 `json:"architect_template_id"`
 	WriterTemplateID    *int64 `json:"writer_template_id"`
@@ -38,14 +39,29 @@ func (h *GenerateHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	if req.LLMProvider == "" {
-		req.LLMProvider = h.defaultProvider
+	if req.Model == "" {
+		if dm, err := h.channelStore.GetDefaultModel(); err == nil {
+			req.Model = dm.ModelCode
+		} else {
+			req.Model = h.defaultModel
+		}
+	}
+
+	// 查模型定价
+	cm, err := h.channelStore.GetModelByCode(req.Model)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model not available: " + req.Model})
+		return
+	}
+	if !cm.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model disabled: " + req.Model})
+		return
 	}
 
 	userID := c.GetInt64("user_id")
+	credits := cm.CreditsPerCall
 
-	// 扣积分
-	if err := h.userStore.DeductCredit(userID, 1); err != nil {
+	if err := h.userStore.DeductCredit(userID, credits); err != nil {
 		if errors.Is(err, store.ErrInsufficientCredits) {
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "insufficient credits"})
 			return
@@ -54,19 +70,17 @@ func (h *GenerateHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	// 异步执行，立即返回 history id
 	historyID, err := h.pipeline.ExecuteAsync(service.PipelineRequest{
 		Input:               req.Input,
 		UserID:              userID,
-		LLMProvider:         req.LLMProvider,
+		Model:               req.Model,
 		AnalyzerTemplateID:  req.AnalyzerTemplateID,
 		ArchitectTemplateID: req.ArchitectTemplateID,
 		WriterTemplateID:    req.WriterTemplateID,
 		ReviewerTemplateID:  req.ReviewerTemplateID,
 	})
 	if err != nil {
-		// 启动失败，退还积分
-		h.userStore.AddCredits(userID, 1)
+		h.userStore.AddCredits(userID, credits)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -83,7 +97,6 @@ func (h *GenerateHandler) Cancel(c *gin.Context) {
 
 	userID := c.GetInt64("user_id")
 
-	// 标记数据库状态为 cancelled
 	if err := h.historyStore.Cancel(id, userID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found or not running"})
@@ -93,10 +106,7 @@ func (h *GenerateHandler) Cancel(c *gin.Context) {
 		return
 	}
 
-	// 取消后台 goroutine 的 context
 	h.pipeline.Cancel(id)
-
-	// 退还积分
 	_ = h.userStore.AddCredits(userID, 1)
 
 	c.JSON(http.StatusOK, gin.H{"message": "cancelled"})

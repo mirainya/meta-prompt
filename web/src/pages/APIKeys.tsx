@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, type APIKeyItem } from '../lib/api';
+import { useToast } from '../components/Toast';
 
 export default function APIKeys() {
   const [keys, setKeys] = useState<APIKeyItem[]>([]);
@@ -7,6 +8,12 @@ export default function APIKeys() {
   const [name, setName] = useState('');
   const [newKey, setNewKey] = useState('');
   const [loading, setLoading] = useState(false);
+  const toast = useToast((s) => s.add);
+
+  const copyKey = (key: string) => {
+    navigator.clipboard.writeText(key);
+    toast('已复制到剪贴板', 'success');
+  };
 
   const load = () => api.listAPIKeys().then(setKeys);
   useEffect(() => { load(); }, []);
@@ -33,7 +40,7 @@ export default function APIKeys() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-5xl mx-auto space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold" style={{ color: 'var(--mp-text-primary)' }}>API Key 管理</h2>
         <button
@@ -55,14 +62,14 @@ export default function APIKeys() {
             暂无 API Key，点击右上角创建
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--mp-border-color)' }}>
-                <th className="text-left px-4 py-3 font-medium" style={{ color: 'var(--mp-text-secondary)' }}>名称</th>
-                <th className="text-left px-4 py-3 font-medium" style={{ color: 'var(--mp-text-secondary)' }}>Key</th>
-                <th className="text-left px-4 py-3 font-medium" style={{ color: 'var(--mp-text-secondary)' }}>状态</th>
-                <th className="text-left px-4 py-3 font-medium" style={{ color: 'var(--mp-text-secondary)' }}>最后使用</th>
-                <th className="text-right px-4 py-3 font-medium" style={{ color: 'var(--mp-text-secondary)' }}>操作</th>
+                <th className="text-left px-4 py-3 font-medium w-[12%]" style={{ color: 'var(--mp-text-secondary)' }}>名称</th>
+                <th className="text-left px-4 py-3 font-medium w-[46%]" style={{ color: 'var(--mp-text-secondary)' }}>Key</th>
+                <th className="text-left px-4 py-3 font-medium w-[12%]" style={{ color: 'var(--mp-text-secondary)' }}>状态</th>
+                <th className="text-left px-4 py-3 font-medium w-[18%]" style={{ color: 'var(--mp-text-secondary)' }}>最后使用</th>
+                <th className="text-right px-4 py-3 font-medium w-[12%]" style={{ color: 'var(--mp-text-secondary)' }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -70,9 +77,20 @@ export default function APIKeys() {
                 <tr key={k.id} style={{ borderBottom: '1px solid var(--mp-border-color)' }}>
                   <td className="px-4 py-3" style={{ color: 'var(--mp-text-primary)' }}>{k.name}</td>
                   <td className="px-4 py-3">
-                    <code className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }}>
-                      {k.prefix}...
-                    </code>
+                    <div className="flex items-center gap-1">
+                      <code className="text-xs px-2 py-0.5 rounded truncate block max-w-[360px]" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-regular)' }} title={k.raw_key || `${k.prefix}...`}>
+                        {k.raw_key || `${k.prefix}...`}
+                      </code>
+                      {k.raw_key && (
+                        <button
+                          onClick={() => copyKey(k.raw_key)}
+                          className="text-xs px-1.5 py-0.5 rounded hover:opacity-80"
+                          style={{ color: 'var(--mp-primary)' }}
+                        >
+                          复制
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -142,13 +160,12 @@ export default function APIKeys() {
             ) : (
               <>
                 <h3 className="text-base font-semibold" style={{ color: 'var(--mp-text-primary)' }}>Key 已创建</h3>
-                <p className="text-xs" style={{ color: 'var(--mp-danger)' }}>请立即复制保存，关闭后将无法再次查看。</p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-xs break-all p-3 rounded-lg" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-text-primary)' }}>
                     {newKey}
                   </code>
                   <button
-                    onClick={() => navigator.clipboard.writeText(newKey)}
+                    onClick={() => copyKey(newKey)}
                     className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium text-white"
                     style={{ background: 'var(--mp-primary)' }}
                   >

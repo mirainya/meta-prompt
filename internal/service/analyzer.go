@@ -16,13 +16,8 @@ func NewAnalyzer(providers *llm.ProviderManager) *Analyzer {
 	return &Analyzer{providers: providers}
 }
 
-func (a *Analyzer) Run(ctx context.Context, providerName string, metaPrompt string, input string) (json.RawMessage, error) {
-	provider, ok := a.providers.Get(providerName)
-	if !ok {
-		return nil, fmt.Errorf("unknown provider: %s", providerName)
-	}
-
-	resp, err := provider.Chat(ctx, llm.ChatRequest{
+func (a *Analyzer) Run(ctx context.Context, modelCode string, metaPrompt string, input string) (json.RawMessage, error) {
+	resp, err := a.providers.Chat(ctx, modelCode, llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: metaPrompt},
 			{Role: "user", Content: input},

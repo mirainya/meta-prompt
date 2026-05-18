@@ -42,7 +42,8 @@ func main() {
 
 	db.AutoMigrate(
 		&model.Template{}, &model.History{}, &model.APIKey{},
-		&model.User{}, &model.LLMConfig{}, &model.TemplateVersion{},
+		&model.User{}, &model.TemplateVersion{},
+		&model.ChannelSource{}, &model.ChannelModel{},
 	)
 
 	if err := store.SeedDefaults(db); err != nil {
@@ -53,7 +54,7 @@ func main() {
 	templateStore := store.NewTemplateStore(db)
 	historyStore := store.NewHistoryStore(db)
 	userStore := store.NewUserStore(db)
-	llmConfigStore := store.NewLLMConfigStore(db)
+	channelStore := store.NewChannelStore(db)
 	apiKeyStore := store.NewAPIKeyStore(db)
 	templateVersionStore := store.NewTemplateVersionStore(db)
 
@@ -62,13 +63,14 @@ func main() {
 		userStore.SetRole(adminUser.ID, "admin")
 	}
 
-	// 从 config.yaml 导入 LLM 配置到数据库（仅首次）
-	seedLLMConfigs(cfg, llmConfigStore)
-
 	// ProviderManager
-	providerMgr := llm.NewProviderManager()
-	dbConfigs, _ := llmConfigStore.List()
-	handler.RebuildAllProviders(providerMgr, dbConfigs)
+	providerMgr := llm.NewProviderManager(channelStore)
+
+	// default model
+	defaultModel := cfg.Defaults.DefaultModel
+	if defaultModel == "" {
+		defaultModel = cfg.Defaults.LLMProvider // backward compat
+	}
 
 	// services
 	eventBus := service.NewEventBus()
@@ -88,13 +90,13 @@ func main() {
 	// handlers
 	templateHandler := handler.NewTemplateHandler(templateStore, templateVersionStore)
 	historyHandler := handler.NewHistoryHandler(historyStore)
-	generateHandler := handler.NewGenerateHandler(pipeline, cfg.Defaults.LLMProvider, userStore, historyStore)
+	generateHandler := handler.NewGenerateHandler(pipeline, defaultModel, userStore, historyStore, channelStore)
 	authHandler := handler.NewAuthHandler(authService, userStore)
-	adminHandler := handler.NewAdminHandler(userStore, llmConfigStore, historyStore, providerMgr)
-	providerHandler := handler.NewProviderHandler(llmConfigStore)
+	adminHandler := handler.NewAdminHandler(userStore, historyStore)
+	channelHandler := handler.NewChannelHandler(channelStore, userStore)
 	sseHandler := handler.NewSSEHandler(eventBus, historyStore)
 	exportHandler := handler.NewExportHandler(historyStore)
-	openHandler := handler.NewOpenHandler(pipeline, historyStore, userStore, cfg.Defaults.LLMProvider)
+	openHandler := handler.NewOpenHandler(pipeline, historyStore, userStore, channelStore, defaultModel)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyStore, historyStore)
 	docsHandler := handler.NewDocsHandler()
 
@@ -133,7 +135,7 @@ func main() {
 	protected.Use(middleware.JWTAuth(authService))
 	{
 		protected.GET("/user/me", authHandler.Me)
-		protected.GET("/providers", providerHandler.ListEnabled)
+		protected.GET("/models", channelHandler.ListAvailableModels)
 
 		protected.POST("/generate", generateHandler.Generate)
 		protected.POST("/histories/:id/cancel", generateHandler.Cancel)
@@ -161,15 +163,21 @@ func main() {
 	admin.Use(middleware.JWTAuth(authService), middleware.AdminAuth(userStore))
 	{
 		admin.GET("/dashboard", adminHandler.Dashboard)
-		admin.GET("/llm-configs", adminHandler.ListLLMConfigs)
-		admin.POST("/llm-configs", adminHandler.CreateLLMConfig)
-		admin.PUT("/llm-configs/:provider", adminHandler.UpdateLLMConfig)
-		admin.DELETE("/llm-configs/:provider", adminHandler.DeleteLLMConfig)
-		admin.POST("/llm-configs/:provider/test", adminHandler.TestLLMConfig)
+
+		// 渠道管理
+		admin.GET("/channels/sources", channelHandler.ListSources)
+		admin.POST("/channels/sources", channelHandler.CreateSource)
+		admin.PUT("/channels/sources/:id", channelHandler.UpdateSource)
+		admin.DELETE("/channels/sources/:id", channelHandler.DeleteSource)
+		admin.POST("/channels/sources/:id/sync", channelHandler.SyncSource)
+		admin.GET("/channels/models", channelHandler.ListModels)
+		admin.PUT("/channels/models/:id", channelHandler.UpdateModel)
+
 		admin.GET("/users", adminHandler.ListUsers)
-		admin.PUT("/users/:id/credits", adminHandler.SetCredits)
-		admin.PUT("/users/:id/toggle", adminHandler.ToggleUser)
-		admin.PUT("/users/:id/reset-password", adminHandler.ResetPassword)
+		admin.PUT("/users/:id/credits", adminHandler.SetUserCredits)
+		admin.PUT("/users/:id/role", adminHandler.SetUserRole)
+		admin.PUT("/users/:id/reset-password", adminHandler.ResetUserPassword)
+		admin.PUT("/users/:id/models", adminHandler.SetUserModels)
 		admin.GET("/templates", templateHandler.List)
 		admin.GET("/templates/:id", templateHandler.Get)
 		admin.PUT("/templates/:id", templateHandler.Update)
@@ -192,7 +200,7 @@ func main() {
 		open.GET("/tasks/:id/stream", sseHandler.Stream)
 		open.GET("/tasks/:id/export", exportHandler.Export)
 		open.POST("/tasks/:id/cancel", openHandler.CancelTask)
-		open.GET("/providers", providerHandler.ListEnabled)
+		open.GET("/models", channelHandler.ListAvailableModels)
 	}
 
 	// 静态文件服务 — SPA fallback
@@ -216,35 +224,5 @@ func main() {
 	slog.Info("server starting", "addr", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("failed to start server: %v", err)
-	}
-}
-
-// seedLLMConfigs 从 config.yaml 导入 LLM 配置到数据库（仅当数据库中无记录时）
-func seedLLMConfigs(cfg *config.Config, llmConfigStore *store.LLMConfigStore) {
-	existing, _ := llmConfigStore.List()
-	if len(existing) > 0 {
-		return
-	}
-
-	defaults := map[string]struct {
-		baseURL string
-		typ     string
-	}{
-		"claude": {"https://api.anthropic.com", "claude"},
-		"openai": {"https://api.openai.com", "openai_compatible"},
-		"gemini": {"https://generativelanguage.googleapis.com", "gemini"},
-	}
-
-	for name, llmCfg := range cfg.LLM {
-		d := defaults[name]
-		llmConfigStore.Upsert(&model.LLMConfig{
-			Provider:  name,
-			Type:      d.typ,
-			APIKey:    llmCfg.APIKey,
-			BaseURL:   d.baseURL,
-			Model:     llmCfg.Model,
-			MaxTokens: llmCfg.MaxTokens,
-			Enabled:   llmCfg.APIKey != "",
-		})
 	}
 }

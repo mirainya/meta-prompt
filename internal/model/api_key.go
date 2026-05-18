@@ -5,6 +5,7 @@ import "time"
 type APIKey struct {
 	ID           int64      `json:"id" gorm:"primaryKey"`
 	KeyHash      string     `json:"-" gorm:"size:64;uniqueIndex;not null"`
+	RawKey       string     `json:"raw_key" gorm:"size:70"`
 	Prefix       string     `json:"prefix" gorm:"size:12;not null"`
 	Name         string     `json:"name" gorm:"size:100;not null"`
 	UserID       int64      `json:"user_id" gorm:"index"`

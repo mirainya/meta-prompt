@@ -73,3 +73,7 @@ func (s *UserStore) UpdatePassword(userID int64, hash string) error {
 func (s *UserStore) SetRole(userID int64, role string) error {
 	return s.db.Model(&model.User{}).Where("id = ?", userID).Update("role", role).Error
 }
+
+func (s *UserStore) SetAllowedModels(userID int64, models []string) error {
+	return s.db.Model(&model.User{}).Where("id = ?", userID).Update("allowed_models", model.StringArray(models)).Error
+}

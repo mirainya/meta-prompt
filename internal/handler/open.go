@@ -17,17 +17,18 @@ type OpenHandler struct {
 	pipeline     *service.Pipeline
 	historyStore *store.HistoryStore
 	userStore    *store.UserStore
-	defaultProv  string
+	channelStore *store.ChannelStore
+	defaultModel string
 }
 
-func NewOpenHandler(p *service.Pipeline, hs *store.HistoryStore, us *store.UserStore, defaultProv string) *OpenHandler {
-	return &OpenHandler{pipeline: p, historyStore: hs, userStore: us, defaultProv: defaultProv}
+func NewOpenHandler(p *service.Pipeline, hs *store.HistoryStore, us *store.UserStore, cs *store.ChannelStore, defaultModel string) *OpenHandler {
+	return &OpenHandler{pipeline: p, historyStore: hs, userStore: us, channelStore: cs, defaultModel: defaultModel}
 }
 
 type OpenGenerateRequest struct {
 	Input         string `json:"input" binding:"required"`
-	LLMProvider   string `json:"llm_provider"`
-	Mode          string `json:"mode"` // "sync" or "async", default "async"
+	Model         string `json:"model"`
+	Mode          string `json:"mode"`
 	WebhookURL    string `json:"webhook_url"`
 	WebhookSecret string `json:"webhook_secret"`
 }
@@ -39,31 +40,38 @@ func (h *OpenHandler) Generate(c *gin.Context) {
 		return
 	}
 
-	if req.LLMProvider == "" {
-		req.LLMProvider = h.defaultProv
+	if req.Model == "" {
+		req.Model = h.defaultModel
 	}
 	if req.Mode == "" {
 		req.Mode = "async"
 	}
 
-	userID := c.GetInt64("user_id")
+	cm, err := h.channelStore.GetModelByCode(req.Model)
+	if err != nil || !cm.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model not available: " + req.Model})
+		return
+	}
 
-	if err := h.userStore.DeductCredit(userID, 1); err != nil {
+	userID := c.GetInt64("user_id")
+	credits := cm.CreditsPerCall
+
+	if err := h.userStore.DeductCredit(userID, credits); err != nil {
 		c.JSON(http.StatusPaymentRequired, gin.H{"error": "insufficient credits"})
 		return
 	}
 
 	pipeReq := service.PipelineRequest{
-		Input:       req.Input,
-		UserID:      userID,
-		LLMProvider: req.LLMProvider,
-		Source:      "api",
-		WebhookURL:  req.WebhookURL,
+		Input:      req.Input,
+		UserID:     userID,
+		Model:      req.Model,
+		Source:     "api",
+		WebhookURL: req.WebhookURL,
 	}
 
 	historyID, err := h.pipeline.ExecuteAsync(pipeReq)
 	if err != nil {
-		h.userStore.AddCredits(userID, 1)
+		h.userStore.AddCredits(userID, credits)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

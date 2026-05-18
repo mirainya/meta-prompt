@@ -16,13 +16,7 @@ func NewWriter(providers *llm.ProviderManager) *Writer {
 	return &Writer{providers: providers}
 }
 
-// RunOne 撰写单组提示词
-func (w *Writer) RunOne(ctx context.Context, providerName string, metaPrompt string, input string, analysis json.RawMessage, blueprint json.RawMessage, currentGroup json.RawMessage, previousPrompts []json.RawMessage) (json.RawMessage, error) {
-	provider, ok := w.providers.Get(providerName)
-	if !ok {
-		return nil, fmt.Errorf("unknown provider: %s", providerName)
-	}
-
+func (w *Writer) RunOne(ctx context.Context, modelCode string, metaPrompt string, input string, analysis json.RawMessage, blueprint json.RawMessage, currentGroup json.RawMessage, previousPrompts []json.RawMessage) (json.RawMessage, error) {
 	userContent := fmt.Sprintf("## 原始需求\n%s\n\n## 需求分析结果\n%s\n\n## 完整工作流蓝图\n%s\n\n## 当前需要撰写的提示词蓝图\n%s",
 		input, string(analysis), string(blueprint), string(currentGroup))
 
@@ -33,7 +27,7 @@ func (w *Writer) RunOne(ctx context.Context, providerName string, metaPrompt str
 		}
 	}
 
-	resp, err := provider.Chat(ctx, llm.ChatRequest{
+	resp, err := w.providers.Chat(ctx, modelCode, llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: metaPrompt},
 			{Role: "user", Content: userContent},

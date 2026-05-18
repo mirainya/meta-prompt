@@ -12,12 +12,14 @@ function ModelSelect({ providers, value, onChange, disabled }: {
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
 
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
       if (btnRef.current?.contains(e.target as Node)) return;
+      if (dropRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', onClick);
@@ -33,7 +35,7 @@ function ModelSelect({ providers, value, onChange, disabled }: {
     setOpen(!open);
   };
 
-  const current = providers.find((p) => p.provider === value);
+  const current = providers.find((p) => p.code === value);
 
   return (
     <>
@@ -50,13 +52,14 @@ function ModelSelect({ providers, value, onChange, disabled }: {
           opacity: disabled ? 0.6 : 1,
         }}
       >
-        <span>{current ? `${current.provider} (${current.model})` : '选择模型'}</span>
+        <span>{current ? current.code : '选择模型'}</span>
         <svg className="w-3.5 h-3.5 shrink-0 transition-transform" style={{ transform: open ? 'rotate(180deg)' : '' }} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
         </svg>
       </button>
       {open && createPortal(
         <div
+          ref={dropRef}
           className="rounded-xl py-1 text-sm shadow-lg"
           style={{
             position: 'fixed',
@@ -71,18 +74,20 @@ function ModelSelect({ providers, value, onChange, disabled }: {
         >
           {providers.map((p) => (
             <button
-              key={p.provider}
-              onClick={() => { onChange(p.provider); setOpen(false); }}
+              key={p.code}
+              onClick={() => { onChange(p.code); setOpen(false); }}
               className="w-full px-3 py-2 text-left flex items-center gap-2 transition-colors"
               style={{
-                color: p.provider === value ? 'var(--mp-primary)' : 'var(--mp-text-regular)',
-                background: p.provider === value ? 'var(--mp-primary-lighter)' : 'transparent',
+                color: p.code === value ? 'var(--mp-primary)' : 'var(--mp-text-regular)',
+                background: p.code === value ? 'var(--mp-primary-lighter)' : 'transparent',
               }}
-              onMouseEnter={(e) => { if (p.provider !== value) e.currentTarget.style.background = 'var(--mp-primary-lighter)'; }}
-              onMouseLeave={(e) => { if (p.provider !== value) e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={(e) => { if (p.code !== value) e.currentTarget.style.background = 'var(--mp-primary-lighter)'; }}
+              onMouseLeave={(e) => { if (p.code !== value) e.currentTarget.style.background = 'transparent'; }}
             >
-              <span className="font-medium">{p.provider}</span>
-              <span style={{ color: 'var(--mp-text-secondary)', fontSize: '12px' }}>{p.model}</span>
+              <span className="font-medium">{p.code}</span>
+              <span style={{ color: 'var(--mp-text-secondary)', fontSize: '12px' }}>
+                {p.billing_type === 'per_token' ? `${p.input_token_price}/${p.output_token_price} 积分/千Token` : `${p.credits_per_call} 积分/次`}
+              </span>
             </button>
           ))}
         </div>,
@@ -103,7 +108,9 @@ export default function Generate() {
   useEffect(() => {
     api.providers().then((list) => {
       setProviders(list);
-      if (list.length > 0) setProvider(list[0].provider);
+      const def = list.find((p) => p.is_default);
+      if (def) setProvider(def.code);
+      else if (list.length > 0) setProvider(list[0].code);
     });
   }, []);
 
@@ -116,6 +123,11 @@ export default function Generate() {
   const [copiedAll, setCopiedAll] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollingIdRef = useRef<number | null>(null);
+
+  // 侧边栏抽屉
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const credits = useAuth((s) => s.credits);
   const setCredits = useAuth((s) => s.setCredits);
@@ -163,20 +175,42 @@ export default function Generate() {
       }
     };
 
-    poll(); // 立即查一次
+    poll();
     pollingRef.current = setInterval(poll, 2000);
   }, [onComplete, onFailed]);
 
-  // 页面 mount 时检查是否有正在进行的推演
+  // 不再自动恢复 running 任务
   useEffect(() => {
-    api.historyRunning().then((status) => {
-      if (status.running && status.id) {
-        setInput(status.input || '');
-        startPolling(status.id);
-      }
-    });
     return () => stopPolling();
-  }, [startPolling, stopPolling]);
+  }, [stopPolling]);
+
+  // 打开抽屉时加载历史
+  const openDrawer = () => {
+    setDrawerOpen(true);
+    setHistoryLoading(true);
+    api.histories(30, 0).then(setHistoryList).finally(() => setHistoryLoading(false));
+  };
+
+  // 点击历史任务
+  const loadHistory = (item: HistoryItem) => {
+    setDrawerOpen(false);
+    stopPolling();
+    setInput(item.input);
+    setError('');
+
+    if (item.status === 'done') {
+      setResult(item);
+      setCurrentStep(4);
+      setLoading(false);
+      setExpandedIdx(0);
+    } else if (item.status === 'running') {
+      startPolling(item.id);
+    } else if (item.status === 'failed' || item.status === 'cancelled') {
+      setResult(null);
+      setLoading(false);
+      setError(item.error_msg || '任务失败');
+    }
+  };
 
   const handleGenerate = async () => {
     if (!input.trim() || loading) return;
@@ -229,13 +263,31 @@ export default function Generate() {
           boxShadow: 'var(--mp-card-shadow)',
         }}
       >
-        <div className="flex items-center gap-2 mb-4">
-          <div className="text-base font-semibold" style={{ color: 'var(--mp-text-primary)' }}>
-            描述你的需求
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="text-base font-semibold" style={{ color: 'var(--mp-text-primary)' }}>
+              描述你的需求
+            </div>
+            <div className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}>
+              AI 将自动推演最优提示词
+            </div>
           </div>
-          <div className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--mp-primary-lighter)', color: 'var(--mp-primary)' }}>
-            AI 将自动推演最优提示词
-          </div>
+          <button
+            onClick={openDrawer}
+            className="h-8 px-3 rounded-lg text-xs flex items-center gap-1.5 transition-all"
+            style={{
+              background: 'var(--mp-primary-lighter)',
+              border: '1px solid var(--mp-border-color)',
+              color: 'var(--mp-text-secondary)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--mp-primary-light)'; e.currentTarget.style.color = 'var(--mp-primary)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--mp-border-color)'; e.currentTarget.style.color = 'var(--mp-text-secondary)'; }}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>历史</span>
+          </button>
         </div>
         <textarea
           value={input}
@@ -498,6 +550,61 @@ export default function Generate() {
             )}
           </div>
         </div>
+      )}
+
+      {/* 侧边栏抽屉 */}
+      {drawerOpen && createPortal(
+        <div className="fixed inset-0" style={{ zIndex: 9998 }}>
+          <div className="absolute inset-0 bg-black/30" onClick={() => setDrawerOpen(false)} />
+          <div
+            className="absolute top-0 right-0 h-full w-80 overflow-y-auto"
+            style={{ background: 'var(--mp-card-bg)', borderLeft: '1px solid var(--mp-border-color)', boxShadow: '-4px 0 24px rgba(0,0,0,0.1)' }}
+          >
+            <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--mp-border-color)' }}>
+              <span className="text-sm font-semibold" style={{ color: 'var(--mp-text-primary)' }}>历史任务</span>
+              <button onClick={() => setDrawerOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg" style={{ color: 'var(--mp-text-secondary)' }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-3 space-y-2">
+              {historyLoading ? (
+                <div className="text-center py-8 text-xs" style={{ color: 'var(--mp-text-secondary)' }}>加载中...</div>
+              ) : historyList.length === 0 ? (
+                <div className="text-center py-8 text-xs" style={{ color: 'var(--mp-text-secondary)' }}>暂无记录</div>
+              ) : historyList.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => loadHistory(item)}
+                  className="w-full text-left p-3 rounded-xl transition-all"
+                  style={{ background: 'var(--mp-primary-lighter)', border: '1px solid var(--mp-border-color)' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--mp-primary-light)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--mp-border-color)'; }}
+                >
+                  <div className="text-xs truncate mb-1.5" style={{ color: 'var(--mp-text-primary)' }}>
+                    {item.input.slice(0, 60)}{item.input.length > 60 ? '...' : ''}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded"
+                      style={{
+                        background: item.status === 'done' ? '#dcfce7' : item.status === 'running' ? '#fef3c7' : '#fee2e2',
+                        color: item.status === 'done' ? '#166534' : item.status === 'running' ? '#92400e' : '#991b1b',
+                      }}
+                    >
+                      {item.status === 'done' ? '完成' : item.status === 'running' ? '运行中' : '失败'}
+                    </span>
+                    <span className="text-[10px]" style={{ color: 'var(--mp-text-secondary)' }}>
+                      {new Date(item.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

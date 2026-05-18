@@ -3,10 +3,10 @@ import { useState } from 'react';
 const endpoints = [
   {
     method: 'POST', path: '/open/v1/generate', title: '创建推演任务',
-    desc: '提交需求文本，异步生成提示词。消耗 1 积分。',
+    desc: '提交需求文本，异步生成提示词。按模型定价消耗积分。',
     params: [
       { name: 'input', type: 'string', required: true, desc: '需求描述' },
-      { name: 'llm_provider', type: 'string', required: false, desc: 'LLM 提供商（可选）' },
+      { name: 'model', type: 'string', required: false, desc: '模型代码（通过 /models 获取）' },
       { name: 'mode', type: 'string', required: false, desc: '"sync" 同步 / "async" 异步（默认）' },
       { name: 'webhook_url', type: 'string', required: false, desc: '完成后回调地址' },
     ],
@@ -52,11 +52,11 @@ const endpoints = [
   -H "X-API-Key: mp_your_key"`,
   },
   {
-    method: 'GET', path: '/open/v1/providers', title: '获取可用模型列表',
-    desc: '返回当前已启用的 LLM 提供商及其模型。',
+    method: 'GET', path: '/open/v1/models', title: '获取可用模型列表',
+    desc: '返回当前已启用的模型列表，包含代码、类型和积分消耗。',
     params: [],
-    response: '[{ "provider": "openai", "model": "gpt-4o" }]',
-    example: `curl {BASE}/open/v1/providers \\
+    response: '[{ "code": "gpt-4o", "type": "openai", "credits_per_call": 5 }]',
+    example: `curl {BASE}/open/v1/models \\
   -H "X-API-Key: mp_your_key"`,
   },
 ];

@@ -16,13 +16,7 @@ func NewReviewer(providers *llm.ProviderManager) *Reviewer {
 	return &Reviewer{providers: providers}
 }
 
-// ReviewOne 审核单组提示词
-func (r *Reviewer) ReviewOne(ctx context.Context, providerName string, metaPrompt string, input string, blueprint json.RawMessage, currentPrompt json.RawMessage, currentOrder int, totalCount int, previousReviewed []json.RawMessage) (json.RawMessage, error) {
-	provider, ok := r.providers.Get(providerName)
-	if !ok {
-		return nil, fmt.Errorf("unknown provider: %s", providerName)
-	}
-
+func (r *Reviewer) ReviewOne(ctx context.Context, modelCode string, metaPrompt string, input string, blueprint json.RawMessage, currentPrompt json.RawMessage, currentOrder int, totalCount int, previousReviewed []json.RawMessage) (json.RawMessage, error) {
 	userContent := fmt.Sprintf("## 原始需求\n%s\n\n## 架构师蓝图\n%s\n\n## 当前审核的提示词（第%d组，共%d组）\n%s",
 		input, string(blueprint), currentOrder, totalCount, string(currentPrompt))
 
@@ -33,7 +27,7 @@ func (r *Reviewer) ReviewOne(ctx context.Context, providerName string, metaPromp
 		}
 	}
 
-	resp, err := provider.Chat(ctx, llm.ChatRequest{
+	resp, err := r.providers.Chat(ctx, modelCode, llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: "system", Content: metaPrompt},
 			{Role: "user", Content: userContent},
