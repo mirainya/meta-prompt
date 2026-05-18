@@ -34,7 +34,8 @@ func (s *HistoryStore) List(limit, offset int) ([]model.History, error) {
 
 func (s *HistoryStore) ListByUser(userID int64, limit, offset int) ([]model.History, error) {
 	var list []model.History
-	err := s.db.Where("user_id = ?", userID).Order("created_at DESC").Limit(limit).Offset(offset).Find(&list).Error
+	err := s.db.Select("id, user_id, input, llm_provider, status, current_step, duration_ms, source, created_at, updated_at").
+		Where("user_id = ?", userID).Order("created_at DESC").Limit(limit).Offset(offset).Find(&list).Error
 	return list, err
 }
 
