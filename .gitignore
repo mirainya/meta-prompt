@@ -33,3 +33,4 @@ config.yaml
 test_output.txt
 generated_prompts.md
 plan.md
+test_classify.go
